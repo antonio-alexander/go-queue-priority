@@ -1,0 +1,7 @@
+{
+    "go.lintTool": "golangci-lint",
+    "go.testFlags": [
+        "-v",
+        "-coverpkg=github.com/antonio-alexander/go-queue-priority,github.com/antonio-alexander/go-queue-priority/finite"
+    ]
+}

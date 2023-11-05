@@ -1,0 +1,123 @@
+name: go-queue-priority
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "./"
+      - ".github/workflows/go-queue-priority.yml"
+
+env:
+  LINTER_VERSION: "v1.51.2"
+  GO_VERSION: "1.19"
+
+jobs:
+  environment:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_SHA: ${{ github.sha }}
+      GITHUB_REF: ${{ github.ref }}
+    steps:
+      - name: Get git source
+        run: |
+          git_source=`echo $GITHUB_REF | sed 's/refs\/heads\///'`
+          git_source=`echo $git_source | sed 's/refs\/tags\///'`
+          git_source=`echo $git_source | sed 's/refs\\///'`
+          echo $git_source
+          echo "git_source=$git_source" >> $GITHUB_ENV
+      - name: Get git SHA
+        run: |
+          git_sha=`echo $GITHUB_SHA`
+          echo $git_sha
+          echo "git_sha=$git_sha" >> $GITHUB_ENV
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+      - name: Get version
+        run: |
+          version_source=`cat /home/runner/work/go-queue-priority/go-queue-priority/version.json | jq '.Version' | sed 's/"//g'`
+          echo $version_source
+          echo "version_source=$version_source" >> $GITHUB_ENV
+      - name: Generate build artifacts
+        run: |
+          mkdir -p /tmp
+          echo ${{ env.version_source }} >> /tmp/version_source
+          echo ${{ env.git_source }} >> /tmp/git_source
+          echo ${{ env.git_sha }} >> /tmp/git_sha
+      - name: Upload artifacts (environment)
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment
+          path: |
+            /tmp/version_source
+            /tmp/git_source
+            /tmp/git_sha
+
+  go_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ env.LINTER_VERSION }}
+          working-directory: .
+          args: --verbose
+
+  go_test:
+    needs: [go_lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Test go-queue-priority/finite
+        continue-on-error: true
+        run: |
+          cd /home/runner/work/go-queue-priority/go-queue-priority/finite
+          go mod download
+          go test -v ./... -coverprofile /tmp/go-queue-priority-finite.out tee /tmp/go-queue-priority-finite.log
+      - name: Upload artifacts (go_test)
+        uses: actions/upload-artifact@v4
+        with:
+          name: go_test
+          path: |
+            /tmp/go-queue-priority-finite.log
+            /tmp/go-queue-infinite.log
+            /tmp/go-queue-priority-finite.out
+            /tmp/go-queue-infinite.out
+          retention-days: 1
+
+  git_push_tag:
+    needs: [go_test, environment]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts (environment)
+        uses: actions/download-artifact@v4
+        with:
+          name: environment
+          path: /tmp
+      - name: Get version
+        run: |
+          version=`cat /tmp/version_source`
+          echo "version=$version" >> $GITHUB_ENV
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: "0"
+      - name: Push/Update go-queue version
+        uses: anothrNick/github-tag-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WITH_V: true
+          CUSTOM_TAG: v${{ env.version }}
